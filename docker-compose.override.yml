@@ -1,0 +1,16 @@
+services:
+  api:
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+
+  pgadmin:
+    image: dpage/pgadmin4
+    profiles:
+      - dev
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@local.dev}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+    ports:
+      - "5050:80"
+    depends_on:
+      - db
