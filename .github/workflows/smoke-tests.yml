@@ -1,0 +1,99 @@
+name: Smoke Tests
+
+on:
+  pull_request:
+    branches:
+      - phase-1/scaffold
+      - main
+
+jobs:
+  smoke:
+    name: Phase 1 Smoke Tests
+    runs-on: ubuntu-latest
+
+    env:
+      ASPNETCORE_ENVIRONMENT: Development
+      API_PORT: 5000
+      POSTGRES_DB: dotnetforge
+      POSTGRES_USER: forge
+      POSTGRES_PASSWORD: smoke_test_password_abc123
+      DB_PORT: 5432
+      JWT_SECRET: smoke_test_jwt_secret_min_32_chars_ok
+      JWT_ISSUER: dotnet-forge
+      JWT_AUDIENCE: dotnet-forge-clients
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Write .env
+        run: |
+          cat <<'EOF' > .env
+          ASPNETCORE_ENVIRONMENT=Development
+          API_PORT=5000
+          POSTGRES_DB=dotnetforge
+          POSTGRES_USER=forge
+          POSTGRES_PASSWORD=smoke_test_password_abc123
+          DB_PORT=5432
+          JWT_SECRET=smoke_test_jwt_secret_min_32_chars_ok
+          JWT_ISSUER=dotnet-forge
+          JWT_AUDIENCE=dotnet-forge-clients
+          EOF
+
+      - name: Build and start stack
+        run: docker compose up --build -d
+
+      - name: Wait for API to be healthy
+        run: |
+          echo "Waiting for API..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:5000/health > /dev/null 2>&1; then
+              echo "API is up after ${i}x5s"
+              break
+            fi
+            echo "  attempt $i/30 — sleeping 5s"
+            sleep 5
+          done
+
+      # ── Test 1: Health check ────────────────────────────────────────────────
+      - name: "Smoke 1: Health check → 200"
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/health)
+          echo "Health status: $STATUS"
+          [ "$STATUS" = "200" ] || { echo "FAIL: expected 200, got $STATUS"; exit 1; }
+
+      # ── Test 2: Get a JWT token ─────────────────────────────────────────────
+      - name: "Smoke 2: POST /api/auth/token → returns token"
+        id: get_token
+        run: |
+          RESPONSE=$(curl -s -X POST http://localhost:5000/api/auth/token \
+            -H "Content-Type: application/json" \
+            -d '{"userId":"u1","email":"test@test.com","roles":["admin"]}')
+          echo "Response: $RESPONSE"
+          TOKEN=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['data'])")
+          echo "TOKEN=$TOKEN" >> "$GITHUB_OUTPUT"
+          [ -n "$TOKEN" ] || { echo "FAIL: no token in response"; exit 1; }
+
+      # ── Test 3: Auth gate (no token) → 401 ─────────────────────────────────
+      - name: "Smoke 3: GET /api/widgets (no token) → 401"
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/api/widgets)
+          echo "Status: $STATUS"
+          [ "$STATUS" = "401" ] || { echo "FAIL: expected 401, got $STATUS"; exit 1; }
+
+      # ── Test 4: Authenticated list → 200 ───────────────────────────────────
+      - name: "Smoke 4: GET /api/widgets (with token) → 200"
+        run: |
+          TOKEN="${{ steps.get_token.outputs.TOKEN }}"
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/api/widgets \
+            -H "Authorization: Bearer $TOKEN")
+          echo "Status: $STATUS"
+          [ "$STATUS" = "200" ] || { echo "FAIL: expected 200, got $STATUS"; exit 1; }
+
+      - name: Dump API logs on failure
+        if: failure()
+        run: docker compose logs api
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose down -v
