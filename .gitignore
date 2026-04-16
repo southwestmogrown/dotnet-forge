@@ -1,0 +1,17 @@
+# Build outputs
+bin/
+obj/
+*.user
+
+# Environment secrets
+.env
+
+# IDE
+.vs/
+.vscode/
+*.suo
+*.DS_Store
+
+# NuGet
+*.nupkg
+.nuget/

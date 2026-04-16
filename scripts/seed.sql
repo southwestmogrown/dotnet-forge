@@ -1,0 +1,3 @@
+-- seed data placeholder
+-- Add client-specific seed data here.
+-- This file runs automatically when the Postgres container first initializes.
