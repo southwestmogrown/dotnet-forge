@@ -11,6 +11,14 @@ services:
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: ${JWT_ISSUER}
       Jwt__Audience: ${JWT_AUDIENCE}
+      Notifications__Email__SmtpHost: ${SMTP_HOST:-}
+      Notifications__Email__SmtpPort: ${SMTP_PORT:-587}
+      Notifications__Email__Username: ${SMTP_USER:-}
+      Notifications__Email__Password: ${SMTP_PASSWORD:-}
+      Notifications__Email__From: ${SMTP_FROM:-}
+      Notifications__Email__To: ${SMTP_TO:-}
+      Notifications__Slack__WebhookUrl: ${SLACK_WEBHOOK_URL:-}
+      Notifications__Webhook__Url: ${WEBHOOK_NOTIFICATION_URL:-}
     depends_on:
       db:
         condition: service_healthy

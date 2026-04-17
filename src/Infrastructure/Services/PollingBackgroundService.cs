@@ -48,6 +48,9 @@ public class PollingBackgroundService : BackgroundService
                 var repo = scope.ServiceProvider
                     .GetRequiredService<IRepository<SensorReading>>();
 
+                var alertEvaluator = scope.ServiceProvider
+                    .GetRequiredService<AlertEvaluator>();
+
                 foreach (var tag in tags)
                 {
                     try
@@ -66,6 +69,17 @@ public class PollingBackgroundService : BackgroundService
                         await _hub.Clients
                             .Group(DeviceDataHub.GroupKey(reading.AdapterId, tag))
                             .SendAsync("TagUpdate", reading, stoppingToken);
+
+                        try
+                        {
+                            await alertEvaluator.EvaluateAsync(reading, stoppingToken);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex,
+                                "Alert evaluation failed for tag {Tag} on adapter {Adapter}",
+                                tag, adapter.AdapterId);
+                        }
                     }
                     catch (Exception ex)
                     {

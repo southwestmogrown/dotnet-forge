@@ -1,3 +1,4 @@
+using Core.Interfaces;
 using Infrastructure.Adapters;
 using Infrastructure.Data;
 using Microsoft.AspNetCore.Hosting;
@@ -15,6 +16,11 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
     /// in-memory database persists across scopes.
     /// </summary>
     private SqliteConnection? _connection;
+
+    /// <summary>
+    /// Shared mock notification channel accessible from tests to inspect dispatched alerts.
+    /// </summary>
+    public MockNotificationChannel MockChannel { get; } = new("mock");
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -65,6 +71,14 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
             var adapterFactory = new AdapterFactory();
             adapterFactory.RegisterProtocol("mock", () => new MockDeviceAdapter());
             services.AddSingleton(adapterFactory);
+
+            // ── Replace real notification channels with mock ─────────────
+            var channelDescriptors = services
+                .Where(d => d.ServiceType == typeof(INotificationChannel))
+                .ToList();
+            foreach (var d in channelDescriptors) services.Remove(d);
+
+            services.AddSingleton<INotificationChannel>(MockChannel);
         });
     }
 
