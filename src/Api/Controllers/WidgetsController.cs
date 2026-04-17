@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using Core.Entities;
 using Core.Exceptions;
 using Core.Interfaces;
@@ -65,4 +66,6 @@ public class WidgetsController : BaseApiController
     }
 }
 
-public record WidgetRequest(string Name, string Description);
+public record WidgetRequest(
+    [property: Required, MaxLength(200)] string Name,
+    [property: MaxLength(2000)] string Description);

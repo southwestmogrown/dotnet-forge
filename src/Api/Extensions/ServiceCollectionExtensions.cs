@@ -1,5 +1,6 @@
 using System.Text;
 using Core.Interfaces;
+using Core.Options;
 using Infrastructure.Adapters;
 using Infrastructure.Data;
 using Infrastructure.Data.Repositories;
@@ -17,8 +18,10 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddJwtAuthentication(
         this IServiceCollection services, IConfiguration config)
     {
-        var secret = config["Jwt:Secret"]
-            ?? throw new InvalidOperationException("Jwt:Secret is not configured.");
+        services.Configure<JwtOptions>(config.GetSection("Jwt"));
+
+        // Resolve IOptions<JwtOptions> to capture values in the lambda
+        var jwtOptions = services.BuildServiceProvider().GetRequiredService<Microsoft.Extensions.Options.IOptions<JwtOptions>>().Value;
 
         services
             .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -27,11 +30,11 @@ public static class ServiceCollectionExtensions
                 options.TokenValidationParameters = new TokenValidationParameters
                 {
                     ValidateIssuerSigningKey = true,
-                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret)),
+                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.Secret)),
                     ValidateIssuer = true,
-                    ValidIssuer = config["Jwt:Issuer"],
+                    ValidIssuer = jwtOptions.Issuer,
                     ValidateAudience = true,
-                    ValidAudience = config["Jwt:Audience"],
+                    ValidAudience = jwtOptions.Audience,
                     ValidateLifetime = true,
                     ClockSkew = TimeSpan.Zero
                 };
@@ -44,6 +47,8 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddInfrastructure(
         this IServiceCollection services, IConfiguration config)
     {
+        services.Configure<JwtOptions>(config.GetSection("Jwt"));
+
         services.AddDbContext<AppDbContext>(options =>
             options.UseNpgsql(config.GetConnectionString("DefaultConnection")));
 

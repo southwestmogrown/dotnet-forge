@@ -13,5 +13,8 @@ RUN dotnet publish "Api.csproj" -c Release -o /app/publish /p:UseAppHost=false
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
 WORKDIR /app
 EXPOSE 8080
+RUN adduser --disabled-password --no-create-home --gecos "" appuser && \
+    chown -R appuser /app
 COPY --from=build /app/publish .
+USER appuser
 ENTRYPOINT ["dotnet", "Api.dll"]

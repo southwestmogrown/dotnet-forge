@@ -6,11 +6,29 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace Infrastructure.Migrations
 {
     /// <inheritdoc />
-    public partial class AddAlertRule : Migration
+    public partial class WidgetMaxLengthConstraints : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.AlterColumn<string>(
+                name: "Name",
+                table: "Widgets",
+                type: "character varying(200)",
+                maxLength: 200,
+                nullable: false,
+                oldClrType: typeof(string),
+                oldType: "text");
+
+            migrationBuilder.AlterColumn<string>(
+                name: "Description",
+                table: "Widgets",
+                type: "character varying(2000)",
+                maxLength: 2000,
+                nullable: false,
+                oldClrType: typeof(string),
+                oldType: "text");
+
             migrationBuilder.CreateTable(
                 name: "AlertRules",
                 columns: table => new
@@ -43,6 +61,24 @@ namespace Infrastructure.Migrations
         {
             migrationBuilder.DropTable(
                 name: "AlertRules");
+
+            migrationBuilder.AlterColumn<string>(
+                name: "Name",
+                table: "Widgets",
+                type: "text",
+                nullable: false,
+                oldClrType: typeof(string),
+                oldType: "character varying(200)",
+                oldMaxLength: 200);
+
+            migrationBuilder.AlterColumn<string>(
+                name: "Description",
+                table: "Widgets",
+                type: "text",
+                nullable: false,
+                oldClrType: typeof(string),
+                oldType: "character varying(2000)",
+                oldMaxLength: 2000);
         }
     }
 }

@@ -1,24 +1,22 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using Core.Options;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Infrastructure.Services;
 
 public class TokenService
 {
-    private readonly IConfiguration _config;
+    private readonly JwtOptions _jwtOptions;
 
-    public TokenService(IConfiguration config) => _config = config;
+    public TokenService(IOptions<JwtOptions> jwtOptions) => _jwtOptions = jwtOptions.Value;
 
     public string GenerateToken(string userId, string email, IEnumerable<string> roles)
     {
-        var secret = _config["Jwt:Secret"];
-        if (string.IsNullOrEmpty(secret))
-            throw new InvalidOperationException("Jwt:Secret is not configured. Provide a minimum 32-character secret.");
-
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtOptions.Secret));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
         var claims = new List<Claim>
@@ -29,8 +27,8 @@ public class TokenService
         claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
 
         var token = new JwtSecurityToken(
-            issuer: _config["Jwt:Issuer"],
-            audience: _config["Jwt:Audience"],
+            issuer: _jwtOptions.Issuer,
+            audience: _jwtOptions.Audience,
             claims: claims,
             expires: DateTime.UtcNow.AddHours(8),
             signingCredentials: creds

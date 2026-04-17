@@ -22,7 +22,9 @@ public class AppDbContext : DbContext
     {
         foreach (var entry in ChangeTracker.Entries<BaseEntity>())
         {
-            if (entry.State == EntityState.Modified)
+            if (entry.State == EntityState.Added)
+                entry.Entity.CreatedAt = DateTime.UtcNow;
+            if (entry.State is EntityState.Added or EntityState.Modified)
                 entry.Entity.UpdatedAt = DateTime.UtcNow;
         }
 
