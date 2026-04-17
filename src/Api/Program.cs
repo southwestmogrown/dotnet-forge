@@ -11,7 +11,6 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerWithJwt();
 builder.Services.AddJwtAuthentication(builder.Configuration);
 builder.Services.AddInfrastructure(builder.Configuration);
-builder.Services.AddSignalR();
 builder.Services
     .AddHealthChecks()
     .AddNpgSql(builder.Configuration.GetConnectionString("DefaultConnection")!);
