@@ -9,5 +9,6 @@ public class SensorReadingConfiguration : IEntityTypeConfiguration<SensorReading
     public void Configure(EntityTypeBuilder<SensorReading> builder)
     {
         builder.HasIndex(r => r.RecordedAt);
+        builder.HasIndex(r => new { r.AdapterId, r.TagAddress, r.RecordedAt });
     }
 }
