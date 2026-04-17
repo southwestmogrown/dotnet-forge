@@ -27,51 +27,56 @@ echo ""
 # ─────────────────────────────────────────────────────────────────────────────
 echo ">>> Creating Milestones..."
 
-declare -A MILESTONE_IDS
-
-create_milestone() {
+get_or_create_milestone() {
   local title="$1"
   local desc="$2"
   local num
-  num=$(gh api "repos/$REPO/milestones" \
-    --method POST \
-    -f title="$title" \
-    -f description="$desc" \
-    -f state="open" \
-    --jq '.number')
-  echo "  Created milestone #$num: $title"
-  echo "$num"
+  # Check if milestone already exists
+  num=$(gh api "repos/$REPO/milestones" --jq ".[] | select(.title == \"$title\") | .number" 2>/dev/null || true)
+  if [ -n "$num" ]; then
+    echo "  Milestone already exists #$num: $title" >&2
+  else
+    num=$(gh api "repos/$REPO/milestones" \
+      --method POST \
+      -f title="$title" \
+      -f description="$desc" \
+      -f state="open" \
+      --jq '.number')
+    echo "  Created milestone #$num: $title" >&2
+  fi
+  # Return the title — gh issue create --milestone expects the name, not the number
+  echo "$title"
 }
 
-M1=$(create_milestone \
+M1=$(get_or_create_milestone \
   "Phase 2.1 — Core Abstractions & Entities" \
   "Define the IDeviceAdapter interface and SensorReading entity that everything else in Phase 2 depends on.")
 
-M2=$(create_milestone \
+M2=$(get_or_create_milestone \
   "Phase 2.2 — Device Adapters (Infrastructure)" \
   "Implement Modbus and OPC-UA protocol adapters, plus the AdapterFactory singleton that manages live adapter instances.")
 
-M3=$(create_milestone \
+M3=$(get_or_create_milestone \
   "Phase 2.3 — Data Persistence" \
   "Extend AppDbContext with SensorReadings, add an EF Core migration, and add a SensorReadingRepository for time-range queries.")
 
-M4=$(create_milestone \
+M4=$(get_or_create_milestone \
   "Phase 2.4 — Real-Time Streaming (SignalR)" \
   "Add the DeviceDataHub and wire SignalR into Program.cs so connected clients can subscribe to live tag updates.")
 
-M5=$(create_milestone \
+M5=$(get_or_create_milestone \
   "Phase 2.5 — Polling Background Service" \
   "Implement PollingBackgroundService that continuously reads all registered adapters, persists readings, and broadcasts to SignalR groups.")
 
-M6=$(create_milestone \
+M6=$(get_or_create_milestone \
   "Phase 2.6 — REST API Surface" \
   "Expose AdaptersController (register/list/remove adapters) and SensorReadingsController (query historical data) over HTTP.")
 
-M7=$(create_milestone \
+M7=$(get_or_create_milestone \
   "Phase 2.7 — Packages, DI Wiring & Config" \
   "Install NuGet packages, update ServiceCollectionExtensions to register all Phase 2 services, and extend docker-compose for local simulator support.")
 
-M8=$(create_milestone \
+M8=$(get_or_create_milestone \
   "Phase 2.8 — Testing & Documentation" \
   "Add integration tests for the adapter registration and polling flow, and update the README with Phase 2 usage instructions.")
 
@@ -111,14 +116,26 @@ echo ">>> Creating Issues..."
 
 create_issue() {
   local title="$1" body="$2" milestone="$3" labels="$4"
-  local num
-  num=$(gh issue create \
+  local url num label_flags=() existing
+  # Skip if an open issue with this exact title already exists
+  existing=$(gh issue list --repo "$REPO" --state open --search "\"$title\" in:title" --json number,title \
+    --jq ".[] | select(.title == \"$title\") | .number" 2>/dev/null | head -1 || true)
+  if [ -n "$existing" ]; then
+    echo "  Issue already exists #$existing: $title"
+    return
+  fi
+  # Build one --label flag per label (gh CLI requires separate flags, not CSV)
+  IFS=',' read -ra label_arr <<< "$labels"
+  for lbl in "${label_arr[@]}"; do
+    label_flags+=(--label "$lbl")
+  done
+  url=$(gh issue create \
     --repo "$REPO" \
     --title "$title" \
     --body "$body" \
     --milestone "$milestone" \
-    --label "$labels" \
-    2>&1 | grep -oE '[0-9]+$' || true)
+    "${label_flags[@]}")
+  num=$(echo "$url" | grep -oE '[0-9]+$')
   echo "  Created issue #$num: $title"
 }
 
@@ -498,37 +515,34 @@ echo ""
 # ─────────────────────────────────────────────────────────────────────────────
 echo ">>> Creating GitHub Project..."
 
-# Create a classic project (v1) — simpler API, no GraphQL needed
-PROJECT_URL=$(gh api "repos/$REPO/projects" \
-  --method POST \
-  -H "Accept: application/vnd.github.inertia-preview+json" \
-  -f name="Phase 2 — Manufacturing Hooks" \
-  -f body="Tracks all work for Phase 2 of dotnet-forge: OPC-UA & Modbus device adapters, SignalR real-time streaming, sensor data persistence, and REST API surface." \
-  --jq '.html_url' 2>/dev/null || echo "")
+# Classic projects (v1) are deprecated — use Projects v2 via GraphQL
+echo "  Creating Projects v2 via GraphQL..."
 
-if [ -n "$PROJECT_URL" ]; then
-  echo "  Created project: $PROJECT_URL"
-else
-  echo "  Classic projects API not available — creating Projects v2 via GraphQL..."
-
-  # Get owner ID
-  OWNER_ID=$(gh api graphql -f query='
+create_project_v2() {
+  local owner_id project_url
+  owner_id=$(gh api graphql -f query='
     query { repositoryOwner(login: "southwestmogrown") { id } }
-  ' --jq '.data.repositoryOwner.id')
+  ' --jq '.data.repositoryOwner.id' 2>/dev/null) || return 1
 
-  PROJECT_ID=$(gh api graphql -f query="
+  project_url=$(gh api graphql -f query="
     mutation {
       createProjectV2(input: {
-        ownerId: \"$OWNER_ID\"
+        ownerId: \"$owner_id\"
         title: \"Phase 2 — Manufacturing Hooks\"
       }) {
         projectV2 { id url }
       }
     }
-  " --jq '.data.createProjectV2.projectV2.url')
+  " --jq '.data.createProjectV2.projectV2.url' 2>/dev/null) || return 1
 
-  echo "  Created project v2: $PROJECT_ID"
-fi
+  if [[ "$project_url" == https* ]]; then
+    echo "  Created project v2: $project_url"
+  else
+    return 1
+  fi
+}
+
+create_project_v2 || echo "  ⚠️  Project creation skipped — token lacks 'project' write scope. Create it manually at: https://github.com/users/southwestmogrown/projects/new"
 
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""

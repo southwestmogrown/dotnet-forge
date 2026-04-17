@@ -2,9 +2,6 @@ name: Smoke Tests
 
 on:
   pull_request:
-    branches:
-      - phase-1/scaffold
-      - main
 
 jobs:
   smoke:
