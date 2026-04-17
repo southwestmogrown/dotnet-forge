@@ -32,8 +32,15 @@ public class AuthController : BaseApiController
     }
 }
 
-public record TokenRequest(
-    [property: Required, MaxLength(128)] string UserId,
-    [property: Required, EmailAddress, MaxLength(256)] string Email,
-    [property: Required] IEnumerable<string> Roles);
+public class TokenRequest
+{
+    [Required, MaxLength(128)]
+    public string UserId { get; init; } = "";
+
+    [Required, EmailAddress, MaxLength(256)]
+    public string Email { get; init; } = "";
+
+    [Required]
+    public IEnumerable<string> Roles { get; init; } = [];
+}
 

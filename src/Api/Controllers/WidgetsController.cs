@@ -66,6 +66,12 @@ public class WidgetsController : BaseApiController
     }
 }
 
-public record WidgetRequest(
-    [property: Required, MaxLength(200)] string Name,
-    [property: MaxLength(2000)] string Description);
+public class WidgetRequest
+{
+    [Required, MaxLength(200)]
+    public string Name { get; init; } = "";
+
+    [MaxLength(2000)]
+    public string Description { get; init; } = "";
+}
+
