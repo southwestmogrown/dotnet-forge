@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Update this URL to point at your own fork / organisation repo
 TEMPLATE_REPO="https://github.com/yourname/dotnet-forge"
 
 echo "╔══════════════════════════════════╗"
@@ -17,9 +18,16 @@ TARGET_DIR="${CLIENT_NAME}-api"
 git clone "$TEMPLATE_REPO" "$TARGET_DIR"
 cd "$TARGET_DIR"
 
-# Rename solution files
-find . -name "*.sln" -exec sed -i "s/dotnet-forge/${CLIENT_NAME}/g" {} \;
-find . -name "*.csproj" -exec sed -i "s/dotnet-forge/${CLIENT_NAME}/g" {} \;
+# Rename solution files (portable across GNU and BSD sed)
+if sed --version >/dev/null 2>&1; then
+  # GNU sed
+  find . -name "*.sln" -exec sed -i "s/dotnet-forge/${CLIENT_NAME}/g" {} \;
+  find . -name "*.csproj" -exec sed -i "s/dotnet-forge/${CLIENT_NAME}/g" {} \;
+else
+  # BSD sed (macOS)
+  find . -name "*.sln" -exec sed -i '' "s/dotnet-forge/${CLIENT_NAME}/g" {} \;
+  find . -name "*.csproj" -exec sed -i '' "s/dotnet-forge/${CLIENT_NAME}/g" {} \;
+fi
 
 # Write .env
 cat > .env <<EOF

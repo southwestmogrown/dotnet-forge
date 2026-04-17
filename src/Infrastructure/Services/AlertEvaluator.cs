@@ -49,13 +49,15 @@ public class AlertEvaluator
         }
     }
 
+    private const double EqualityTolerance = 0.0001;
+
     private static bool IsTriggered(AlertCondition condition, double value, double threshold) =>
         condition switch
         {
             AlertCondition.GreaterThan => value > threshold,
             AlertCondition.LessThan   => value < threshold,
-            AlertCondition.Equal      => Math.Abs(value - threshold) < 0.0001,
-            AlertCondition.NotEqual   => Math.Abs(value - threshold) >= 0.0001,
+            AlertCondition.Equal      => Math.Abs(value - threshold) < EqualityTolerance,
+            AlertCondition.NotEqual   => Math.Abs(value - threshold) >= EqualityTolerance,
             _ => false
         };
 }
