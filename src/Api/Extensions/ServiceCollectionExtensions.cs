@@ -51,6 +51,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<TokenService>();
         services.AddSingleton<AdapterFactory>();
         services.AddHostedService<PollingBackgroundService>();
+        services.AddSignalR();
 
         return services;
     }
