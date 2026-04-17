@@ -1,5 +1,6 @@
 using System.Text;
 using Core.Interfaces;
+using Infrastructure.Adapters;
 using Infrastructure.Data;
 using Infrastructure.Data.Repositories;
 using Infrastructure.Services;
@@ -47,6 +48,7 @@ public static class ServiceCollectionExtensions
 
         services.AddScoped(typeof(IRepository<>), typeof(GenericRepository<>));
         services.AddScoped<TokenService>();
+        services.AddSingleton<AdapterFactory>();
 
         return services;
     }
