@@ -24,6 +24,9 @@ public class AdapterIntegrationTests : IClassFixture<CustomWebApplicationFactory
     private const string JwtSecret = "integration-test-secret-key-that-is-at-least-32-chars!";
     private const string JwtIssuer = "dotnet-forge-test";
     private const string JwtAudience = "dotnet-forge-test";
+    private const int MaxPollingAttempts = 25;
+    private const int PollingDelayMs = 200;
+    private const int SignalRTimeoutSeconds = 10;
 
     public AdapterIntegrationTests(CustomWebApplicationFactory factory)
     {
@@ -92,11 +95,11 @@ public class AdapterIntegrationTests : IClassFixture<CustomWebApplicationFactory
 
         var adapterId = postBody.Data.AdapterId;
 
-        // Act – wait for the background service to poll (fast interval = 200ms, wait up to 5s)
+        // Act – wait for the background service to poll (fast interval = 200ms)
         SensorReading? reading = null;
-        for (var i = 0; i < 25; i++)
+        for (var i = 0; i < MaxPollingAttempts; i++)
         {
-            await Task.Delay(200);
+            await Task.Delay(PollingDelayMs);
 
             using var scope = _factory.Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -160,7 +163,7 @@ public class AdapterIntegrationTests : IClassFixture<CustomWebApplicationFactory
         await hubConnection.InvokeAsync("SubscribeToTag", adapterId, tag);
 
         // Act – wait for a TagUpdate message (polling is fast)
-        var completed = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(10)));
+        var completed = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(SignalRTimeoutSeconds)));
 
         // Assert
         Assert.Equal(tcs.Task, completed); // ensure it wasn't the timeout

@@ -58,7 +58,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
             // ── Register mock protocol on AdapterFactory ────────────────
             // Replace the existing singleton with a pre-configured instance
             // so that the "mock" protocol is available at runtime.
-            var afDescriptor = services.SingleOrDefault(
+            var afDescriptor = services.FirstOrDefault(
                 d => d.ServiceType == typeof(AdapterFactory));
             if (afDescriptor != null) services.Remove(afDescriptor);
 
