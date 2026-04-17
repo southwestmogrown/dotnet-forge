@@ -14,3 +14,20 @@ services:
       - "5050:80"
     depends_on:
       - db
+
+  modbus-sim:
+    image: oitc/modbus-server
+    profiles:
+      - dev
+    ports:
+      - "${MODBUS_SIM_PORT:-502}:502"
+    restart: unless-stopped
+
+  opcua-sim:
+    image: mcr.microsoft.com/iotedge/opc-plc
+    profiles:
+      - dev
+    ports:
+      - "${OPCUA_SIM_PORT:-50000}:50000"
+    command: --autoaccept --portnum=50000
+    restart: unless-stopped
