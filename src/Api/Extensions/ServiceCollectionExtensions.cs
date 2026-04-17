@@ -47,6 +47,7 @@ public static class ServiceCollectionExtensions
             options.UseNpgsql(config.GetConnectionString("DefaultConnection")));
 
         services.AddScoped(typeof(IRepository<>), typeof(GenericRepository<>));
+        services.AddScoped<ISensorReadingRepository, SensorReadingRepository>();
         services.AddScoped<TokenService>();
         services.AddSingleton<AdapterFactory>();
 
