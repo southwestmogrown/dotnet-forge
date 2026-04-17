@@ -6,6 +6,7 @@ namespace Infrastructure.Adapters;
 public class AdapterFactory
 {
     private readonly ConcurrentDictionary<string, IDeviceAdapter> _adapters = new();
+    private readonly ConcurrentDictionary<string, AdapterConfig> _configs = new();
 
     public async Task<IDeviceAdapter> RegisterAsync(AdapterConfig config, CancellationToken ct = default)
     {
@@ -25,6 +26,7 @@ public class AdapterFactory
         }
 
         _adapters[adapter.AdapterId] = adapter;
+        _configs[adapter.AdapterId] = config;
         return adapter;
     }
 
@@ -33,6 +35,9 @@ public class AdapterFactory
     public IDeviceAdapter? Get(string adapterId) =>
         _adapters.TryGetValue(adapterId, out var adapter) ? adapter : null;
 
+    public AdapterConfig? GetConfig(string adapterId) =>
+        _configs.TryGetValue(adapterId, out var config) ? config : null;
+
     public async Task RemoveAsync(string adapterId, CancellationToken ct = default)
     {
         if (_adapters.TryRemove(adapterId, out var adapter))
@@ -40,5 +45,6 @@ public class AdapterFactory
             await adapter.DisconnectAsync(ct);
             await adapter.DisposeAsync();
         }
+        _configs.TryRemove(adapterId, out _);
     }
 }

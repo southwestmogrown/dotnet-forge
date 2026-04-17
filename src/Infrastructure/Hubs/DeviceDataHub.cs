@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 
-namespace Api.Hubs;
+namespace Infrastructure.Hubs;
 
 [Authorize]
 public class DeviceDataHub : Hub
@@ -20,6 +20,6 @@ public class DeviceDataHub : Hub
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, GroupKey(adapterId, tagAddress));
     }
 
-    private static string GroupKey(string adapterId, string tagAddress) =>
+    public static string GroupKey(string adapterId, string tagAddress) =>
         $"{adapterId}::{tagAddress}";
 }
