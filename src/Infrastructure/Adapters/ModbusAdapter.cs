@@ -10,6 +10,7 @@ public class ModbusAdapter : IDeviceAdapter
     private IModbusMaster? _master;
     private TcpClient? _client;
     private AdapterConfig? _config;
+    private byte _slaveId = 1;
 
     public string AdapterId { get; private set; } = string.Empty;
     public bool IsConnected => _client?.Connected ?? false;
@@ -18,6 +19,14 @@ public class ModbusAdapter : IDeviceAdapter
     {
         _config = config;
         AdapterId = $"modbus-{config.Host}:{config.Port}";
+
+        if (config.Options != null &&
+            config.Options.TryGetValue("SlaveId", out var slaveIdStr) &&
+            byte.TryParse(slaveIdStr, out var slaveId))
+        {
+            _slaveId = slaveId;
+        }
+
         _client = new TcpClient();
         await _client.ConnectAsync(config.Host, config.Port, ct);
         var factory = new ModbusFactory();
@@ -28,16 +37,20 @@ public class ModbusAdapter : IDeviceAdapter
     {
         // tagAddress format: "HR:0:1" = register type, start address, count
         var parts = tagAddress.Split(':');
+        if (parts.Length < 2)
+            throw new ArgumentException(
+                $"Invalid tag address format. Expected \"TYPE:ADDRESS[:COUNT]\" (e.g., \"HR:0:1\"), got \"{tagAddress}\".");
+
         var type = parts[0];    // HR, CO, DI, IR
         var start = ushort.Parse(parts[1]);
         var count = ushort.Parse(parts.Length > 2 ? parts[2] : "1");
 
         object value = type switch
         {
-            "HR" => await _master!.ReadHoldingRegistersAsync(1, start, count),
-            "CO" => await _master!.ReadCoilsAsync(1, start, count),
-            "DI" => await _master!.ReadInputsAsync(1, start, count),
-            "IR" => await _master!.ReadInputRegistersAsync(1, start, count),
+            "HR" => await _master!.ReadHoldingRegistersAsync(_slaveId, start, count),
+            "CO" => await _master!.ReadCoilsAsync(_slaveId, start, count),
+            "DI" => await _master!.ReadInputsAsync(_slaveId, start, count),
+            "IR" => await _master!.ReadInputRegistersAsync(_slaveId, start, count),
             _ => throw new ArgumentException($"Unknown register type: {type}")
         };
 
@@ -47,13 +60,17 @@ public class ModbusAdapter : IDeviceAdapter
     public async Task WriteTagAsync(string tagAddress, object value, CancellationToken ct = default)
     {
         var parts = tagAddress.Split(':');
+        if (parts.Length < 2)
+            throw new ArgumentException(
+                $"Invalid tag address format. Expected \"TYPE:ADDRESS[:COUNT]\" (e.g., \"HR:0:1\"), got \"{tagAddress}\".");
+
         var type = parts[0];
         var address = ushort.Parse(parts[1]);
 
         if (type == "HR")
-            await _master!.WriteSingleRegisterAsync(1, address, Convert.ToUInt16(value));
+            await _master!.WriteSingleRegisterAsync(_slaveId, address, Convert.ToUInt16(value));
         else if (type == "CO")
-            await _master!.WriteSingleCoilAsync(1, address, Convert.ToBoolean(value));
+            await _master!.WriteSingleCoilAsync(_slaveId, address, Convert.ToBoolean(value));
         else
             throw new NotSupportedException($"Write not supported for register type: {type}");
     }
@@ -72,7 +89,7 @@ public class ModbusAdapter : IDeviceAdapter
     public Task DisconnectAsync(CancellationToken ct = default)
     {
         _master?.Dispose();
-        _client?.Close();
+        _client?.Dispose();
         return Task.CompletedTask;
     }
 
