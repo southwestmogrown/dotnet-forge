@@ -6,5 +6,5 @@ public class SensorReading : BaseEntity
     public string TagAddress { get; set; } = string.Empty;
     public string Value { get; set; } = string.Empty;
     public string Unit { get; set; } = string.Empty;
-    public DateTime RecordedAt { get; set; } = DateTime.UtcNow;
+    public DateTime RecordedAt { get; set; }
 }
