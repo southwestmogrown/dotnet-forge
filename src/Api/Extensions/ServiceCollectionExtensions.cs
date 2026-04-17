@@ -4,6 +4,7 @@ using Infrastructure.Adapters;
 using Infrastructure.Data;
 using Infrastructure.Data.Repositories;
 using Infrastructure.Services;
+using Infrastructure.Services.Notifications;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -52,6 +53,14 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<AdapterFactory>();
         services.AddHostedService<PollingBackgroundService>();
         services.AddSignalR();
+
+        // Phase 3 — Alert & notification services
+        services.AddScoped<AlertEvaluator>();
+        services.AddScoped<NotificationDispatcher>();
+        services.AddSingleton<INotificationChannel, EmailNotificationChannel>();
+        services.AddSingleton<INotificationChannel, SlackNotificationChannel>();
+        services.AddSingleton<INotificationChannel, WebhookNotificationChannel>();
+        services.AddHttpClient();
 
         return services;
     }

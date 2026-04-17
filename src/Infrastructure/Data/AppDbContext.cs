@@ -10,6 +10,7 @@ public class AppDbContext : DbContext
 
     public DbSet<Widget> Widgets => Set<Widget>();
     public DbSet<SensorReading> SensorReadings => Set<SensorReading>();
+    public DbSet<AlertRule> AlertRules => Set<AlertRule>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
