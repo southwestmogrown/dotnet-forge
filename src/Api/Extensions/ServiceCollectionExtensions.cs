@@ -50,6 +50,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ISensorReadingRepository, SensorReadingRepository>();
         services.AddScoped<TokenService>();
         services.AddSingleton<AdapterFactory>();
+        services.AddHostedService<PollingBackgroundService>();
 
         return services;
     }
