@@ -1267,4 +1267,279 @@ chmod +x scripts/scaffold-client.sh
 | `npm install` | `dotnet add package` (NuGet) |
 | `nodemon` | `dotnet watch run` |
 | Jest / Playwright | xUnit + Moq for unit; Playwright still valid for E2E |
+
+---
+
+## Adversarial Code Review — Findings & Remediation Plan
+
+> Reviewed against the committed Phase 1 scaffold. Issues are grouped by severity and assigned to the phase where they should be fixed.
+
+### Legend
+
+| Severity | Meaning |
+|---|---|
+| **CRITICAL** | Exploitable with no prerequisites; fix before any external exposure |
+| **HIGH** | Exploitable under realistic conditions or causes data loss |
+| **MEDIUM** | Raises risk meaningfully; fix before production |
+| **LOW** | Best-practice gaps; address in a hardening pass |
+
+---
+
+### CRITICAL
+
+#### C-1 — Unauthenticated Token Endpoint Accepts Arbitrary Claims
+**File:** `src/Api/Controllers/AuthController.cs:17-22`  
+**Problem:** `POST /api/auth/token` has no authentication. Any caller can POST `{"userId":"admin","email":"x@y.com","roles":["admin"]}` and receive a fully-valid, signed JWT — bypassing auth entirely.  
+**Fix (Phase 1):** This endpoint is intentionally simple for the scaffold but must be clearly marked as a development-only shortcut. Options in order of preference:
+1. Gate the endpoint behind `[Authorize]` and pre-seed one bootstrap credential in `.env`.
+2. Add a shared API key check (`X-Api-Key` header validated against `Auth:BootstrapKey` config) so only the provisioning caller can use it.
+3. Annotate with a prominent `// DEV-ONLY` comment and add a startup assertion that blocks the endpoint when `ASPNETCORE_ENVIRONMENT` is not `Development`.
+
+#### C-2 — JWT Secret Not Validated for Minimum Strength at Startup
+**File:** `src/Infrastructure/Services/TokenService.cs:17-19`  
+**Problem:** The secret is checked for null/empty but not for length. An HS256 key shorter than 32 bytes is trivially brute-forced offline.  
+**Fix (Phase 1):** Add a startup guard:
+```csharp
+if (secret.Length < 32)
+    throw new InvalidOperationException("Jwt:Secret must be at least 32 characters.");
+```
+Add the same guard in `ServiceCollectionExtensions` when configuring `TokenValidationParameters`.
+
+#### C-3 — No Input Validation on `TokenRequest` or `WidgetRequest`
+**Files:** `src/Api/Controllers/AuthController.cs:20`, `src/Api/Controllers/WidgetsController.cs:41`  
+**Problem:** Unbounded strings accepted — a 10 MB `Name` field causes database bloat / OOM. No email-format check. Arbitrary role names can be embedded in JWT claims.  
+**Fix (Phase 1):** Add Data Annotations or FluentValidation:
+```csharp
+public record TokenRequest(
+    [Required, MaxLength(128)] string UserId,
+    [Required, EmailAddress, MaxLength(256)] string Email,
+    [Required] IEnumerable<string> Roles);
+
+public record WidgetRequest(
+    [Required, MaxLength(200)] string Name,
+    [MaxLength(2000)] string Description);
+```
+Enable model-state validation in `BaseApiController` or via a global `ActionFilter`.
+
+---
+
+### HIGH
+
+#### H-1 — Docker Container Runs as Root
+**File:** `Dockerfile`  
+**Problem:** No `USER` directive; the ASP.NET process runs as `root` (UID 0). A container escape grants full host access.  
+**Fix (Phase 1):** Add a non-root user in the final stage:
+```dockerfile
+RUN adduser --disabled-password --no-create-home appuser
+USER appuser
+```
+
+#### H-2 — PostgreSQL Port Exposed on Host Network
+**File:** `docker-compose.yml:28-29`  
+**Problem:** `"${DB_PORT:-5432}:5432"` binds Postgres to `0.0.0.0` on the host. On any cloud VM, the database is publicly reachable.  
+**Fix (Phase 1):** Bind to localhost only in non-production compose:
+```yaml
+ports:
+  - "127.0.0.1:${DB_PORT:-5432}:5432"
+```
+Or remove the port mapping entirely and connect via the Docker internal network name `db`.
+
+#### H-3 — Automatic Migrations at Startup Create Race Conditions
+**File:** `src/Api/Program.cs:32-36`  
+**Problem:** `db.Database.MigrateAsync()` runs on every startup. With multiple replicas starting simultaneously, migrations race against each other and can corrupt schema state or deadlock.  
+**Fix (Phase 2):** Move migrations out of application startup into a dedicated init container or a one-shot `dotnet ef database update` step in the compose/deploy pipeline. Guard the startup call with a distributed lock (Redis, advisory lock) if removing it is not immediately feasible.
+
+#### H-4 — No Security Headers
+**File:** `src/Api/Program.cs`  
+**Problem:** No `X-Content-Type-Options`, `X-Frame-Options`, `Content-Security-Policy`, or `Strict-Transport-Security`. The API is vulnerable to MIME sniffing, clickjacking, and protocol downgrade attacks.  
+**Fix (Phase 1):** Add a small middleware or use `NWebSec` / `AspNetCoreSecurityHeaders`:
+```csharp
+app.Use(async (ctx, next) => {
+    ctx.Response.Headers.Append("X-Content-Type-Options", "nosniff");
+    ctx.Response.Headers.Append("X-Frame-Options", "DENY");
+    ctx.Response.Headers.Append("Referrer-Policy", "no-referrer");
+    await next();
+});
+```
+
+#### H-5 — No Rate Limiting
+**File:** `src/Api/Program.cs`  
+**Problem:** No throttle on `POST /api/auth/token` or any other endpoint. Brute-force, credential stuffing, and DDoS are trivially possible.  
+**Fix (Phase 1):** Use the built-in ASP.NET Core 7+ rate limiting middleware:
+```csharp
+builder.Services.AddRateLimiter(o => o.AddFixedWindowLimiter("default",
+    opts => { opts.Window = TimeSpan.FromMinutes(1); opts.PermitLimit = 100; }));
+app.UseRateLimiter();
+```
+Apply a stricter policy to the auth endpoint.
+
+#### H-6 — No Database Column Length Constraints
+**File:** `src/Infrastructure/Migrations/20260416193137_InitialCreate.cs:19-20`  
+**Problem:** `Widget.Name` and `Widget.Description` columns are `text` with no max length. A single malicious INSERT can exhaust disk.  
+**Fix (Phase 1):** Add an `IEntityTypeConfiguration<Widget>` (or use `[MaxLength]` attributes that EF Core respects in migrations) and regenerate the migration.
+
+#### H-7 — TOCTOU Race on Widget Update
+**File:** `src/Api/Controllers/WidgetsController.cs:47-57`  
+**Problem:** `GetByIdAsync` then `UpdateAsync` is not atomic. A concurrent delete between the two calls will cause an unexpected exception rather than a clean 404.  
+**Fix (Phase 2):** Add an EF Core `[Timestamp]` / `RowVersion` concurrency token to `BaseEntity` and handle `DbUpdateConcurrencyException` in `GenericRepository`.
+
+#### H-8 — Test Credentials Hardcoded in Workflow (Committed to Git)
+**File:** `.github/workflows/smoke-tests.yml:16-20`  
+**Problem:** `POSTGRES_PASSWORD: smoke_test_password_abc123` and `JWT_SECRET: smoke_test_jwt_secret_min_32_chars_ok` are in git history forever.  
+**Fix (Phase 1):** These are test-only credentials with no production equivalent, so the risk is contained — but best practice is still to move them to GitHub Actions secrets so they are not visible to all contributors in the repo.
+
+---
+
+### MEDIUM
+
+#### M-1 — `BaseEntity` Timestamps Set at Object Construction, Not at Persistence
+**File:** `src/Core/Entities/BaseEntity.cs:6-7`  
+**Problem:** `DateTime.UtcNow` runs when the object is instantiated (e.g., during model binding deserialization), not when `SaveChangesAsync` is called. The timestamp can be minutes early.  
+**Fix (Phase 1):** Override `SaveChanges` / `SaveChangesAsync` in `AppDbContext` to set timestamps on `Added`/`Modified` entries:
+```csharp
+foreach (var entry in ChangeTracker.Entries<BaseEntity>()) {
+    if (entry.State == EntityState.Added)   entry.Entity.CreatedAt = DateTime.UtcNow;
+    if (entry.State is EntityState.Added or EntityState.Modified)
+        entry.Entity.UpdatedAt = DateTime.UtcNow;
+}
+```
+
+#### M-2 — Health Check Endpoint Is Unauthenticated and Reveals Availability
+**File:** `src/Api/Program.cs:30`  
+**Problem:** `/health` is publicly reachable with no auth. Attackers can poll it to time restarts or confirm the service is alive before probing.  
+**Fix (Phase 2):** Restrict health checks to internal networks or require an API key:
+```csharp
+app.MapHealthChecks("/health").RequireAuthorization(); // or restrict by IP
+```
+Or expose it only on a separate internal port not published to the host.
+
+#### M-3 — Swagger Enabled in Development Only — No Explicit Production Guard
+**File:** `src/Api/Program.cs:23-24`  
+**Problem:** Swagger is gated on `IsDevelopment()`, which is safe, but a misconfigured deployment (`ASPNETCORE_ENVIRONMENT` not set) defaults to `Production` — that's fine — but the pattern gives no defense-in-depth.  
+**Fix (Phase 1):** Acceptable as-is. Add a comment and document in `README` that `ASPNETCORE_ENVIRONMENT=Production` must be set in production `.env`.
+
+#### M-4 — No Concurrency Tokens (Last-Write-Wins on Updates)
+**File:** `src/Core/Entities/BaseEntity.cs`  
+**Problem:** Concurrent updates to the same entity silently overwrite each other.  
+**Fix (Phase 2):** Add `[Timestamp] public byte[] RowVersion { get; set; }` to `BaseEntity` and handle `DbUpdateConcurrencyException` in the repository.
+
+#### M-5 — Request Body Size Unlimited
+**File:** `src/Api/Program.cs`  
+**Problem:** No `MaxRequestBodySize` configured. A 2 GB request body will be buffered into memory.  
+**Fix (Phase 1):**
+```csharp
+builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 1_048_576); // 1 MB
+```
+
+#### M-6 — `AllowedHosts: "*"` Allows Host Header Injection
+**File:** `src/Api/appsettings.json:8`  
+**Problem:** Accepts requests with any `Host` header. An attacker can forge the Host header to poison cache servers or generate password-reset links pointing at a hostile domain.  
+**Fix (Phase 1):** Set `AllowedHosts` to the actual deployment hostname in `appsettings.Production.json`. Leave `*` only in `appsettings.Development.json`.
+
+#### M-7 — No Audit Logging for Auth Events
+**File:** `src/Api/Controllers/AuthController.cs`, `src/Api/Middleware/ExceptionMiddleware.cs`  
+**Problem:** Token generation, 401s, and 403s are not logged. Impossible to detect credential-stuffing attacks or investigate incidents.  
+**Fix (Phase 2):** Add structured log statements (`ILogger`) to `AuthController` (token issued for `{UserId}`) and extend `ExceptionMiddleware` to log 4xx responses at `Warning` level.
+
+#### M-8 — No Startup Validation of Required Configuration
+**File:** `src/Api/Program.cs`  
+**Problem:** `ConnectionStrings__DefaultConnection`, `Jwt:Secret`, `Jwt:Issuer`, `Jwt:Audience` are checked lazily (when first used), producing cryptic runtime errors.  
+**Fix (Phase 1):** Use `builder.Services.AddOptions<T>().Bind(config.GetSection("Jwt")).ValidateDataAnnotations().ValidateOnStart()` or a simple startup guard that checks all required keys before `app.Run()`.
+
+#### M-9 — No Token Revocation Mechanism
+**Files:** `src/Infrastructure/Services/TokenService.cs`, `src/Api/Extensions/ServiceCollectionExtensions.cs`  
+**Problem:** Issued JWTs are valid for 8 hours with no way to revoke them (deleted user, password reset, logout).  
+**Fix (Phase 3):** For the scope of this template a short expiry + refresh-token pattern is sufficient. Alternatively, maintain a small in-memory (or Redis-backed) revocation list checked in a custom `ISecurityTokenValidator`.
+
+#### M-10 — Duplicate JWT Secret Null-Check in Two Places
+**Files:** `src/Api/Extensions/ServiceCollectionExtensions.cs:18-19`, `src/Infrastructure/Services/TokenService.cs:17-19`  
+**Problem:** The null guard is duplicated. If logic changes in one place it may not be updated in the other.  
+**Fix (Phase 1):** Extract into a single `JwtOptions` record validated via the Options pattern, and inject `IOptions<JwtOptions>` in both places.
+
+---
+
+### LOW
+
+#### L-1 — Docker Base Images Use Floating Tags
+**File:** `Dockerfile:1,13`  
+**Problem:** `mcr.microsoft.com/dotnet/sdk:8.0` is a floating tag. A new patch release can silently change the build environment.  
+**Fix (Phase 2):** Pin to a specific patch version: `mcr.microsoft.com/dotnet/aspnet:8.0.15-alpine3.21`. Revisit on each planned update cycle.
+
+#### L-2 — No Container Resource Limits
+**File:** `docker-compose.yml`  
+**Problem:** Runaway processes can consume all host memory/CPU and take down co-located containers.  
+**Fix (Phase 2):**
+```yaml
+deploy:
+  resources:
+    limits:
+      memory: 512m
+      cpus: "1.0"
+```
+
+#### L-3 — Stack Traces Returned to Clients in Development
+**File:** `src/Api/Middleware/ExceptionMiddleware.cs:50`  
+**Problem:** `ex.ToString()` is serialized into the HTTP response body in Development. This is intentional for DX but worth documenting — never set `ASPNETCORE_ENVIRONMENT=Development` in a shared staging environment.  
+**Fix:** Add a note to `README` / deployment docs. No code change needed.
+
+#### L-4 — `NotFoundException` Leaks Entity Names and IDs
+**File:** `src/Core/Exceptions/NotFoundException.cs:6`  
+**Problem:** `"{entityName} with id '{id}' was not found."` discloses the internal entity model name and the GUID attempted. Helps attackers enumerate resources.  
+**Fix (Phase 2):** Return a generic "Resource not found" message externally; keep the detailed message in the server-side log only (pass `innerException` or log separately in the middleware).
+
+#### L-5 — No API Versioning Strategy
+**Files:** All controllers  
+**Problem:** No `/v1/` prefix or `Asp.Versioning` package. Breaking changes in a future phase will affect all existing clients.  
+**Fix (Phase 3):** Add `Asp.Versioning.Mvc` and prefix all routes with `[Route("api/v{version:apiVersion}/[controller]")]`.
+
+#### L-6 — No X-Request-ID / Correlation Header
+**File:** `src/Api/Program.cs`  
+**Problem:** Requests cannot be correlated across logs.  
+**Fix (Phase 2):** Add a small middleware that reads or generates `X-Request-ID`, sets it on the response, and pushes it into the log scope.
+
+#### L-7 — No Container Image Vulnerability Scanning in CI
+**File:** `.github/workflows/smoke-tests.yml`  
+**Problem:** No Trivy or Snyk scan step. Vulnerable OS packages in the base image go undetected.  
+**Fix (Phase 2):** Add a Trivy scan step after `docker compose up --build`:
+```yaml
+- name: Scan image for vulnerabilities
+  uses: aquasecurity/trivy-action@master
+  with:
+    image-ref: dotnet-forge-api:latest
+    exit-code: '1'
+    severity: CRITICAL,HIGH
+```
+
+---
+
+### Remediation Phases
+
+| Fix ID | Issue | Phase | Effort |
+|--------|-------|-------|--------|
+| C-1 | Token endpoint auth | 1 | S |
+| C-2 | JWT secret length validation | 1 | XS |
+| C-3 | Input validation (TokenRequest, WidgetRequest) | 1 | S |
+| H-1 | Non-root Docker user | 1 | XS |
+| H-2 | Postgres port bind to 127.0.0.1 | 1 | XS |
+| H-4 | Security headers middleware | 1 | S |
+| H-5 | Rate limiting on auth endpoint | 1 | S |
+| H-6 | DB column length constraints | 1 | S |
+| H-8 | Move workflow credentials to GitHub Secrets | 1 | XS |
+| M-1 | Timestamp fix in AppDbContext.SaveChangesAsync | 1 | S |
+| M-5 | Max request body size | 1 | XS |
+| M-6 | AllowedHosts in production appsettings | 1 | XS |
+| M-8 | Startup config validation | 1 | S |
+| M-10 | JwtOptions record (remove duplication) | 1 | S |
+| H-3 | Migrate migrations out of startup | 2 | M |
+| H-7 | Concurrency token + TOCTOU fix | 2 | M |
+| M-2 | Health check auth | 2 | S |
+| M-4 | RowVersion on BaseEntity | 2 | S |
+| M-7 | Audit logging for auth events | 2 | S |
+| L-1 | Pin Docker base image tags | 2 | XS |
+| L-2 | Container resource limits | 2 | XS |
+| L-4 | Generic external error messages | 2 | S |
+| L-6 | X-Request-ID correlation header | 2 | S |
+| L-7 | Trivy image scan in CI | 2 | S |
+| M-9 | Token revocation / refresh tokens | 3 | L |
+| L-5 | API versioning | 3 | M |
 | `npm init` | `dotnet new` |
