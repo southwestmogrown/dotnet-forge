@@ -9,6 +9,7 @@ public class AppDbContext : DbContext
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
 
     public DbSet<Widget> Widgets => Set<Widget>();
+    public DbSet<SensorReading> SensorReadings => Set<SensorReading>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
