@@ -38,3 +38,6 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.Run();
+
+// Make the auto-generated Program class accessible for WebApplicationFactory<Program> in integration tests
+public partial class Program { }
